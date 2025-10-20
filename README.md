@@ -1,0 +1,1 @@
+# pa-strateji-par-a-9-Claude-codex
