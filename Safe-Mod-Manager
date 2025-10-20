@@ -1,0 +1,400 @@
+diff --git a/safe_mode_manager.py b/safe_mode_manager.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..11c55c592518ff8bc330fd23a05eed013d85da0d
+--- /dev/null
++++ b/safe_mode_manager.py
+@@ -0,0 +1,394 @@
++"""Safe mode management module with persistence and dynamic risk controls."""
++
++from __future__ import annotations
++
++import json
++import logging
++from dataclasses import asdict, dataclass, field, fields
++from datetime import datetime
++from pathlib import Path
++from typing import Dict, List, Optional
++
++
++logger = logging.getLogger(__name__)
++
++
++@dataclass
++class SafeModeConfig:
++    """Configuration for the :class:`SafeModeManager`."""
++
++    drawdown_threshold_pct: float = 0.10
++    consecutive_loss_threshold: int = 3
++    paper_mode_enabled: bool = True
++    risk_reduction_factor: float = 0.5
++    recovery_win_streak: int = 2
++    recovery_drawdown_pct: float = 0.05
++    min_risk_multiplier: float = 0.1
++    max_drawdown_for_min_risk: float = 0.30
++    state_file_path: str = "safe_state.json"
++    equity_history_limit: int = 500
++
++
++@dataclass
++class SafeModeState:
++    """Runtime state that can be persisted to disk."""
++
++    active: bool = False
++    activated_at: Optional[str] = None
++    reason: str = ""
++    current_drawdown_pct: float = 0.0
++    max_drawdown_pct: float = 0.0
++    consecutive_losses: int = 0
++    consecutive_wins: int = 0
++    paper_mode: bool = False
++    risk_multiplier: float = 1.0
++    trades_in_safe_mode: int = 0
++    peak_equity: float = 0.0
++    equity_history: List[float] = field(default_factory=list)
++
++
++class Notifier:
++    """Lightweight notifier abstraction for messaging integrations."""
++
++    def __init__(self, channel: Optional[str] = None) -> None:
++        self._channel = channel or "default"
++
++    def send_alert(self, level: str, message: str) -> None:
++        """Log alerts so they can be redirected to external services later."""
++
++        level = level.lower()
++        if level == "critical":
++            logger.critical("[%s] %s", self._channel, message)
++        elif level == "warning":
++            logger.warning("[%s] %s", self._channel, message)
++        elif level == "info":
++            logger.info("[%s] %s", self._channel, message)
++        else:
++            logger.debug("[%s] %s", self._channel, message)
++
++
++class SafeModeManager:
++    """Manage safe mode lifecycle with persistence and risk controls."""
++
++    def __init__(
++        self,
++        config: Optional[SafeModeConfig] = None,
++        notifier: Optional[Notifier] = None,
++    ) -> None:
++        self.config = config or SafeModeConfig()
++        self.notifier = notifier or Notifier()
++        self.state_file = Path(self.config.state_file_path)
++        self.state = self._load_state()
++        self.trade_history: List[Dict[str, object]] = []
++
++        if self.state.active:
++            logger.info(
++                "Safe mode restored from disk. Reason: %s | Activated at: %s",
++                self.state.reason,
++                self.state.activated_at,
++            )
++
++    # ------------------------------------------------------------------
++    # Public API
++    # ------------------------------------------------------------------
++    def check_and_trigger(
++        self,
++        equity_usdt: float,
++        current_drawdown_usdt: Optional[float] = None,
++    ) -> bool:
++        """Evaluate triggers and activate safe mode when required."""
++
++        drawdown_pct = self._update_equity(equity_usdt)
++
++        if current_drawdown_usdt is not None and equity_usdt > 0:
++            external_drawdown_pct = abs(current_drawdown_usdt) / equity_usdt
++            drawdown_pct = max(drawdown_pct, external_drawdown_pct)
++            self.state.current_drawdown_pct = drawdown_pct
++
++        if self.state.active:
++            self._update_dynamic_risk(drawdown_pct)
++            self._persist_state()
++            return True
++
++        if drawdown_pct >= self.config.drawdown_threshold_pct:
++            reason = (
++                f"Drawdown {drawdown_pct * 100:.1f}% (limit: "
++                f"{self.config.drawdown_threshold_pct * 100:.1f}%)"
++            )
++            self.activate_safe_mode(reason)
++            return True
++
++        if self.state.consecutive_losses >= self.config.consecutive_loss_threshold:
++            reason = f"{self.state.consecutive_losses} consecutive losses"
++            self.activate_safe_mode(reason)
++            return True
++
++        self._persist_state()
++        return False
++
++    def activate_safe_mode(self, reason: str) -> None:
++        """Activate safe mode and persist the state."""
++
++        if self.state.active:
++            return
++
++        self.state.active = True
++        self.state.activated_at = datetime.now().isoformat()
++        self.state.reason = reason
++        self.state.paper_mode = self.config.paper_mode_enabled
++        self.state.trades_in_safe_mode = 0
++
++        self._update_dynamic_risk(self.state.current_drawdown_pct)
++        self._persist_state()
++
++        logger.warning("Safe mode activated: %s", reason)
++        self.notifier.send_alert("critical", f"🚨 SAFE MODE ACTIVATED 🚨\n{reason}")
++        self._log_recovery_conditions()
++
++    def deactivate_safe_mode(self, reason: str) -> None:
++        """Deactivate safe mode and persist the state."""
++
++        if not self.state.active:
++            return
++
++        duration = self._calculate_duration()
++
++        self.state.active = False
++        self.state.paper_mode = False
++        self.state.risk_multiplier = 1.0
++        self.state.reason = reason
++
++        self._persist_state()
++
++        logger.info(
++            "Safe mode deactivated. Reason: %s | Duration: %s | Trades: %s",
++            reason,
++            duration,
++            self.state.trades_in_safe_mode,
++        )
++        self.notifier.send_alert(
++            "info",
++            "✅ SAFE MODE DEACTIVATED\n"
++            f"Reason: {reason}\nDuration: {duration}\n"
++            f"Trades in safe mode: {self.state.trades_in_safe_mode}",
++        )
++
++    def check_recovery(self, current_drawdown_pct: Optional[float] = None) -> bool:
++        """Check recovery conditions and deactivate safe mode when possible."""
++
++        if not self.state.active:
++            return False
++
++        drawdown_pct = (
++            current_drawdown_pct
++            if current_drawdown_pct is not None
++            else self.state.current_drawdown_pct
++        )
++
++        if self.state.consecutive_wins >= self.config.recovery_win_streak:
++            self.deactivate_safe_mode(
++                f"{self.state.consecutive_wins} win streak achieved",
++            )
++            return True
++
++        if drawdown_pct < self.config.recovery_drawdown_pct:
++            self.deactivate_safe_mode(
++                f"Drawdown recovered to {drawdown_pct * 100:.1f}%",
++            )
++            return True
++
++        self._persist_state()
++        return False
++
++    def record_trade_result(self, is_win: bool, pnl: float) -> None:
++        """Record trade result and update streak counters."""
++
++        timestamp = datetime.now().isoformat()
++        self.trade_history.append({"timestamp": timestamp, "is_win": is_win, "pnl": pnl})
++        if len(self.trade_history) > 100:
++            self.trade_history.pop(0)
++
++        if is_win:
++            self.state.consecutive_wins += 1
++            self.state.consecutive_losses = 0
++        else:
++            self.state.consecutive_losses += 1
++            self.state.consecutive_wins = 0
++
++        if self.state.active:
++            self.state.trades_in_safe_mode += 1
++
++        streak_type = "WIN" if is_win else "LOSS"
++        streak_count = (
++            self.state.consecutive_wins if is_win else self.state.consecutive_losses
++        )
++        logger.info("Trade recorded: %s (streak: %s)", streak_type, streak_count)
++        self._persist_state()
++
++    def get_risk_multiplier(self) -> float:
++        """Return the current risk multiplier."""
++
++        return self.state.risk_multiplier if self.state.active else 1.0
++
++    def is_paper_mode(self) -> bool:
++        """Return whether paper trading mode is enabled."""
++
++        return self.state.paper_mode
++
++    def is_safe_mode_active(self) -> bool:
++        """Return whether safe mode is currently active."""
++
++        return self.state.active
++
++    def get_status(self) -> Dict[str, object]:
++        """Return a serialisable snapshot of the current state."""
++
++        return {
++            "safe_mode_active": self.state.active,
++            "paper_mode": self.state.paper_mode,
++            "risk_multiplier": self.state.risk_multiplier,
++            "consecutive_wins": self.state.consecutive_wins,
++            "consecutive_losses": self.state.consecutive_losses,
++            "current_drawdown_pct": self.state.current_drawdown_pct * 100,
++            "max_drawdown_pct": self.state.max_drawdown_pct * 100,
++            "reason": self.state.reason if self.state.active else None,
++            "activated_at": self.state.activated_at,
++            "trades_in_safe_mode": self.state.trades_in_safe_mode,
++            "peak_equity": self.state.peak_equity,
++        }
++
++    def force_deactivate(self) -> None:
++        """Force disable safe mode."""
++
++        if self.state.active:
++            self.deactivate_safe_mode("Manual override")
++
++    def reset_streaks(self) -> None:
++        """Reset win/loss streak counters."""
++
++        self.state.consecutive_wins = 0
++        self.state.consecutive_losses = 0
++        logger.info("Streaks reset")
++        self._persist_state()
++
++    # ------------------------------------------------------------------
++    # Internal helpers
++    # ------------------------------------------------------------------
++    def _update_equity(self, equity_usdt: float) -> float:
++        """Update equity history and compute drawdown percentage."""
++
++        if equity_usdt <= 0:
++            logger.warning("Received non-positive equity value: %s", equity_usdt)
++            return self.state.current_drawdown_pct
++
++        history = self.state.equity_history
++        history.append(equity_usdt)
++        if len(history) > self.config.equity_history_limit:
++            history.pop(0)
++
++        if equity_usdt > self.state.peak_equity:
++            self.state.peak_equity = equity_usdt
++
++        if self.state.peak_equity > 0:
++            drawdown_pct = max(
++                0.0,
++                (self.state.peak_equity - equity_usdt) / self.state.peak_equity,
++            )
++        else:
++            drawdown_pct = 0.0
++
++        self.state.current_drawdown_pct = drawdown_pct
++        self.state.max_drawdown_pct = max(self.state.max_drawdown_pct, drawdown_pct)
++        return drawdown_pct
++
++    def _calculate_duration(self) -> str:
++        """Calculate how long safe mode has been active."""
++
++        if not self.state.activated_at:
++            return "N/A"
++
++        activated = datetime.fromisoformat(self.state.activated_at)
++        duration = datetime.now() - activated
++
++        hours = duration.total_seconds() / 3600
++        if hours < 1:
++            minutes = duration.total_seconds() / 60
++            return f"{minutes:.0f} minutes"
++        if hours < 24:
++            return f"{hours:.1f} hours"
++        days = hours / 24
++        return f"{days:.1f} days"
++
++    def _update_dynamic_risk(self, drawdown_pct: float) -> None:
++        """Update risk multiplier based on the magnitude of the drawdown."""
++
++        if not self.state.active:
++            self.state.risk_multiplier = 1.0
++            return
++
++        threshold = self.config.drawdown_threshold_pct
++        base_multiplier = self.config.risk_reduction_factor
++        min_multiplier = self.config.min_risk_multiplier
++        max_dd = max(self.config.max_drawdown_for_min_risk, threshold)
++
++        if drawdown_pct <= threshold:
++            multiplier = base_multiplier
++        else:
++            span = max_dd - threshold
++            if span <= 0:
++                multiplier = min_multiplier
++            else:
++                scale = min((drawdown_pct - threshold) / span, 1.0)
++                multiplier = base_multiplier - (base_multiplier - min_multiplier) * scale
++
++        self.state.risk_multiplier = max(min_multiplier, round(multiplier, 4))
++
++    def _log_recovery_conditions(self) -> None:
++        """Log recovery criteria for visibility."""
++
++        logger.info(
++            "Recovery conditions → %s win streak OR drawdown < %.2f%%",
++            self.config.recovery_win_streak,
++            self.config.recovery_drawdown_pct * 100,
++        )
++
++    def _persist_state(self) -> None:
++        """Persist the state to disk in JSON format."""
++
++        data = asdict(self.state)
++        try:
++            if self.state_file.parent and not self.state_file.parent.exists():
++                self.state_file.parent.mkdir(parents=True, exist_ok=True)
++            with self.state_file.open("w", encoding="utf-8") as handle:
++                json.dump(data, handle, indent=2)
++        except OSError as exc:
++            logger.error("Failed to persist safe mode state: %s", exc)
++
++    def _load_state(self) -> SafeModeState:
++        """Load state from disk, returning defaults when missing."""
++
++        state = SafeModeState()
++        if not self.state_file.exists():
++            return state
++
++        try:
++            with self.state_file.open("r", encoding="utf-8") as handle:
++                data = json.load(handle)
++        except (OSError, json.JSONDecodeError) as exc:
++            logger.error("Failed to load safe mode state, using defaults: %s", exc)
++            return state
++
++        valid_fields = {field_.name for field_ in fields(SafeModeState)}
++        for key, value in data.items():
++            if key in valid_fields:
++                setattr(state, key, value)
++
++        if not isinstance(state.equity_history, list):
++            state.equity_history = []
++        if len(state.equity_history) > self.config.equity_history_limit:
++            state.equity_history = state.equity_history[-self.config.equity_history_limit :]
++
++        return state
++
++
++__all__ = ["SafeModeConfig", "SafeModeState", "SafeModeManager", "Notifier"]
