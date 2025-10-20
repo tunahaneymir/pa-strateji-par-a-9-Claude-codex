@@ -72,3 +72,27 @@ trading_bot/
     ├── coin_selection_agent.py      # Agent 1
     ├── trading_agent.py             # Agent 2 (uses Parça 1-4)
     └── risk_agent.py                # Agent 3 (uses RMM from Pozisyon-Agent)
+
+Klasör dağılımı
+Parça    Klasör        İçerik
+1        core/         Trend + Zone Detection
+2        core/         Entry + Exit System
+3        adaptive/     Re-entry + Adaptive Params + Liquidity + Zone Memory
+4        rl/           RL Agent + Setup Scoring + Gates
+5        rl/ veya Pozisyon-Agent/rmm_engine.py    Risk & Correlation (zaten var!)
+6        rl/           Reward System + Anti-FOMO
+7        rl/           Anti-Revenge + Overtrading + Emotional
+8        learning/     Continuous Learning + Performance + Integration
+9        infrastructure/     System Resilience + Monitoring
+
+ÖZET TÜM 9 PARÇA
+         Parça                    Klasör            Dosya Sayısı
+1        Trend & Zone             core/             3 dosya
+2        Entry & Exit             core/             4 dosya
+3        Re-entry & Adaptive      adaptive/         4 dosya
+4        RL Architecture          rl/               4 dosya
+5        Risk & Correlation       Pozisyon-Agent/   Zaten var
+6        Reward & Anti-FOMO       rl/               2 dosya
+7        Anti-Revenge             rl/               3 dosya
+8        Learning & Integration   learning/         5 dosya
+9        System Resilience        infrastructure/   9 dosya
