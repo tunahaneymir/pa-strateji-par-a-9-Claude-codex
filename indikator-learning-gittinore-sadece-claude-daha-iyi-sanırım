@@ -1,0 +1,228 @@
+# ════════════════════════════════════════════════════════════
+# PA + RL Trading Bot - Complete .gitignore
+# ════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────
+# BOT STATE & DATA (CRITICAL - Never commit!)
+# ───────────────────────────────────────────────────────────
+state/
+data/
+backups/
+exports/
+logs/
+
+# State files
+*.json
+!requirements.json
+!package.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ───────────────────────────────────────────────────────────
+# CREDENTIALS & CONFIG (SECURITY)
+# ───────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+config/local.yaml
+config/production.yaml
+config/secrets.yaml
+
+# API Keys
+*_apikey.txt
+*_secret.txt
+credentials.json
+secrets.json
+
+# Telegram bot token
+telegram_config.json
+
+# ───────────────────────────────────────────────────────────
+# PYTHON
+# ───────────────────────────────────────────────────────────
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# ───────────────────────────────────────────────────────────
+# MODELS & CHECKPOINTS
+# ───────────────────────────────────────────────────────────
+models/*.pth
+models/*.pkl
+models/*.h5
+models/*.onnx
+models/checkpoints/
+
+# Keep model architecture, ignore weights
+!models/architecture.py
+
+# ───────────────────────────────────────────────────────────
+# JUPYTER NOTEBOOK
+# ───────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# Except analysis notebooks (optional)
+!notebooks/analysis_template.ipynb
+
+# ───────────────────────────────────────────────────────────
+# IDE & EDITORS
+# ───────────────────────────────────────────────────────────
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ───────────────────────────────────────────────────────────
+# TESTING
+# ───────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ───────────────────────────────────────────────────────────
+# OS FILES
+# ───────────────────────────────────────────────────────────
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+.directory
+
+# ───────────────────────────────────────────────────────────
+# TEMPORARY FILES
+# ───────────────────────────────────────────────────────────
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.log
+*.lock
+
+# ───────────────────────────────────────────────────────────
+# DOCUMENTATION BUILD
+# ───────────────────────────────────────────────────────────
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# ───────────────────────────────────────────────────────────
+# TRADING SPECIFIC
+# ───────────────────────────────────────────────────────────
+# Backtest results
+backtests/results/
+backtests/reports/
+
+# Paper trading data
+paper_trading/
+
+# Live trading data (CRITICAL)
+live_trading/
+
+# Performance reports (can contain sensitive data)
+reports/*.html
+reports/*.pdf
+
+# Trade history (CRITICAL - contains real trades)
+trade_history.csv
+trades_*.csv
+
+# Zone memory (learned patterns)
+zone_memory.json
+zone_memory.db
+
+# ───────────────────────────────────────────────────────────
+# KEEP THESE (Whitelist)
+# ───────────────────────────────────────────────────────────
+# Keep example configs
+!config/example.yaml
+!config/template.yaml
+
+# Keep README
+!README.md
+!docs/README.md
+
+# Keep requirements
+!requirements.txt
+!requirements-dev.txt
+
+# Keep .gitignore itself
+!.gitignore
+
+# Keep documentation
+!docs/**/*.md
+
+# ───────────────────────────────────────────────────────────
+# NOTES
+# ───────────────────────────────────────────────────────────
+# This .gitignore is designed for a production trading bot.
+# NEVER commit:
+# - Real API keys
+# - Live trading data
+# - State files
+# - RL model weights (too large)
+# - Personal configurations
