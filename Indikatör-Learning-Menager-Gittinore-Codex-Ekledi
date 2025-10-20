@@ -1,0 +1,8 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000000000000000000000000000000000000..997308ee7ea7f7761742e07903eb00e250e1796b
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,2 @@
++state/
++__pycache__/
